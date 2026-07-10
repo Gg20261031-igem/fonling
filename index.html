@@ -133,6 +133,22 @@ textarea{resize:none}
 @media(min-width:768px){
   #app{max-width:480px;margin:0 auto;box-shadow:0 0 30px rgba(0,0,0,.3);border-left:1px solid #333;border-right:1px solid #333}
 }
+/* ===== Login Screen ===== */
+#loginOverlay{position:fixed;inset:0;z-index:2000;background:#0d0d0d;display:flex;align-items:center;justify-content:center}
+#loginBox{width:85%;max-width:380px;padding:32px 24px;background:#1a1a1a;border-radius:16px;text-align:center}
+#loginBox h2{color:#e0e0e0;font-size:22px;font-weight:600;margin-bottom:6px}
+#loginBox p{color:#888;font-size:14px;margin-bottom:20px}
+#charNameInput{width:100%;padding:12px 16px;border:1px solid #444;border-radius:10px;background:#111;color:#e0e0e0;font-size:16px;text-align:center;margin-bottom:14px;outline:none}
+#charNameInput:focus{border-color:var(--primary)}
+.login-btn-group{display:flex;gap:10px}
+.login-btn-group button{flex:1;padding:12px;border-radius:10px;font-size:15px;font-weight:500;border:none;cursor:pointer}
+#loginCharBtn{background:var(--primary);color:#fff}
+#createCharBtn{background:transparent;border:1px solid #555;color:#ccc}
+#loginCharBtn:active,#createCharBtn:active{opacity:.7}
+#charListWrap{margin-top:20px;text-align:left}
+#charListWrap p{color:#888;font-size:13px;margin-bottom:8px}
+.char-list-item{padding:10px 14px;background:#111;border-radius:8px;color:#e0e0e0;font-size:15px;margin-bottom:6px;cursor:pointer;transition:background .15s}
+.char-list-item:active{background:#252525}
 </style>
 </head>
 <body>
@@ -159,6 +175,14 @@ textarea{resize:none}
       <button id="closeSettingsBtn" aria-label="关闭">✕</button>
     </div>
     <div class="settings-body">
+      <span class="label">当前角色</span>
+      <span id="currentCharDisplay" style="color:var(--primary);font-size:15px;font-weight:500">未登录</span>
+      <div class="spacer"></div>
+      <button class="btn-block btn-outline" id="switchCharBtn">切换角色</button>
+      <div class="spacer"></div>
+      <button class="btn-block btn-danger" id="deleteCharBtn">删除此角色</button>
+      <hr>
+ 
       <span class="label">DeepSeek API Key</span>
       <span class="desc">填入你的 DeepSeek API 密钥，格式如 sk-xxxxxxxx</span>
       <input type="password" id="apiKeyInput" placeholder="sk-..." autocomplete="off">
@@ -211,6 +235,23 @@ textarea{resize:none}
   </div>
 </div>
 
+<!-- Login Overlay -->
+<div id="loginOverlay">
+  <div id="loginBox">
+    <h2>AI 聊天助手</h2>
+    <p>输入角色名登录或创建新角色</p>
+    <input type="text" id="charNameInput" placeholder="输入角色名称" autocomplete="off">
+    <div class="login-btn-group">
+      <button id="loginCharBtn">登录角色</button>
+      <button id="createCharBtn">创建角色</button>
+    </div>
+    <div id="charListWrap">
+      <p>已有角色：</p>
+      <div id="charListItems"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ==============================================
    AI 聊天助手 — 完整应用脚本
@@ -222,15 +263,9 @@ const MAX_MSG_BEFORE_SUMMARY = 30;
 const RECENT_KEEP = 14;
 
 const LS = {
-  API_KEY: 'ai_chat_api_key',
-  SYSTEM_PROMPT: 'ai_chat_system_prompt',
-  STYLE: 'ai_chat_style',
-  BG_IMAGE: 'ai_chat_bg_image',
-  MESSAGES: 'ai_chat_messages',
- SUMMARY: 'ai_chat_summary',
-  USER_IDENTITY: 'ai_chat_user_identity',
-  HISTORY_EVENTS: 'ai_chat_history_events',
-  CURRENT_STATE: 'ai_chat_current_state',
+  CHAR_PREFIX: 'ai_char_',
+  CHAR_LIST: 'ai_char_list',
+  CURRENT_CHAR: 'ai_current_char',
 };
 
 let state = {
@@ -243,11 +278,12 @@ let state = {
   userIdentity: '',
   historyEvents: [],
   currentState: '',
+  currentCharacter: '',
   isStreaming: false,
   summarising: false,
 };
- 
- const $ = id => document.getElementById(id);
+
+const $ = id => document.getElementById(id);
  const chatArea = $('chatArea');
  const messageInput = $('messageInput');
  const sendBtn = $('sendBtn');
@@ -261,42 +297,54 @@ const userIdentityInput = $('userIdentityInput');
 const currentStateInput = $('currentStateInput');
 const historyEventsContainer = $('historyEventsContainer');
 const addEventBtn = $('addEventBtn');
+const switchCharBtn = $('switchCharBtn');
+const deleteCharBtn = $('deleteCharBtn');
+const charNameInput = $('charNameInput');
+const loginCharBtn = $('loginCharBtn');
+const createCharBtn = $('createCharBtn');
 
 /* ---- Persistence ---- */
- function loadState() {
-   try {
-     state.apiKey = localStorage.getItem(LS.API_KEY) || '';
-     state.systemPrompt = localStorage.getItem(LS.SYSTEM_PROMPT) || '';
-     state.style = localStorage.getItem(LS.STYLE) || '';
-     state.bgImage = localStorage.getItem(LS.BG_IMAGE) || '';
-     state.summary = localStorage.getItem(LS.SUMMARY) || '';
-    state.userIdentity = localStorage.getItem(LS.USER_IDENTITY) || '';
-    state.historyEvents = JSON.parse(localStorage.getItem(LS.HISTORY_EVENTS) || '[]');
-    state.currentState = localStorage.getItem(LS.CURRENT_STATE) || '';
-    const raw = localStorage.getItem(LS.MESSAGES);
-    state.messages = raw ? JSON.parse(raw) : [];
-   } catch (e) {
-     state.messages = [];
-   }
- }
- function save(key, value) {
-   try { localStorage.setItem(key, value) } catch (e) {}
- }
- function saveJson(key, value) {
-   try { localStorage.setItem(key, JSON.stringify(value)) } catch (e) {}
- }
- function saveMessages() {
-   saveJson(LS.MESSAGES, state.messages);
- }
- function persistSettings() {
-   save(LS.API_KEY, state.apiKey);
-   save(LS.SYSTEM_PROMPT, state.systemPrompt);
-   save(LS.STYLE, state.style);
-   save(LS.BG_IMAGE, state.bgImage);
-   save(LS.SUMMARY, state.summary);
-  save(LS.USER_IDENTITY, state.userIdentity);
-  saveJson(LS.HISTORY_EVENTS, state.historyEvents);
-  save(LS.CURRENT_STATE, state.currentState);
+function getCharDataKey(name) {
+  return LS.CHAR_PREFIX + name.toLowerCase().trim() + '_data';
+}
+function getCharMsgKey(name) {
+  return LS.CHAR_PREFIX + name.toLowerCase().trim() + '_msg';
+}
+function getCharacterList() {
+  try { return JSON.parse(localStorage.getItem(LS.CHAR_LIST) || '[]'); } catch(e) { return []; }
+}
+function saveCharacterList(list) {
+  try { localStorage.setItem(LS.CHAR_LIST, JSON.stringify(list)); } catch(e) {}
+}
+function loadCharacterData(charName) {
+  if (!charName) return;
+  try {
+    var d = JSON.parse(localStorage.getItem(getCharDataKey(charName)) || '{}');
+    state.messages = JSON.parse(localStorage.getItem(getCharMsgKey(charName)) || '[]');
+    state.apiKey = d.apiKey || '';
+    state.systemPrompt = d.systemPrompt || '';
+    state.style = d.style || '';
+    state.userIdentity = d.userIdentity || '';
+    state.bgImage = d.bgImage || '';
+    state.historyEvents = Array.isArray(d.historyEvents) ? d.historyEvents : [];
+    state.currentState = d.currentState || '';
+    state.summary = d.summary || '';
+  } catch(e) { state.messages = []; }
+}
+function saveCurrentCharacter() {
+  var name = state.currentCharacter;
+  if (!name) return;
+  try {
+    localStorage.setItem(getCharDataKey(name), JSON.stringify({
+      apiKey: state.apiKey, systemPrompt: state.systemPrompt, style: state.style,
+      userIdentity: state.userIdentity, bgImage: state.bgImage,
+      historyEvents: state.historyEvents, currentState: state.currentState,
+      summary: state.summary
+    }));
+    localStorage.setItem(getCharMsgKey(name), JSON.stringify(state.messages));
+  } catch(e) {
+    addSystemMsg('⚠️ 存储空间不足，建议压缩背景图片或清理聊天记录', true);
+  }
 }
 
 /* ---- Background ---- */
@@ -425,9 +473,9 @@ async function autoSummarize() {
     const summary = data.choices?.[0]?.message?.content?.trim();
     if (summary) {
       state.summary = summary;
-      save(LS.SUMMARY, state.summary);
+      saveCurrentCharacter();
       state.messages = state.messages.slice(-RECENT_KEEP);
-      saveMessages();
+      saveCurrentCharacter();
       noteWrap.querySelector('.bubble').textContent = '✅ 历史记忆已压缩，继续畅聊吧';
       var self = noteWrap;
       setTimeout(function(){ self.remove(); renderMessages(); }, 1500);
@@ -453,7 +501,7 @@ async function sendMessage() {
   sendBtn.disabled = true;
   state.isStreaming = true;
   state.messages.push({ role: 'user', content: text });
-  saveMessages();
+  saveCurrentCharacter();
   renderMessages();
   const assistantMsg = { role: 'assistant', content: '', _streaming: true };
   state.messages.push(assistantMsg);
@@ -469,7 +517,7 @@ async function sendMessage() {
       let errMsg = '请求失败 (' + response.status + ')';
       try { const errBody = await response.json(); errMsg = errBody.error?.message || errMsg; } catch(_) {}
       state.messages.pop();
-      saveMessages();
+      saveCurrentCharacter();
       renderMessages();
       addSystemMsg('❌ ' + errMsg, true);
       state.isStreaming = false; sendBtn.disabled = false;
@@ -513,11 +561,11 @@ async function sendMessage() {
     assistantMsg.content = fullContent;
     delete assistantMsg._streaming;
     finishStreamingBubble();
-    saveMessages();
+    saveCurrentCharacter();
     if (state.messages.length > MAX_MSG_BEFORE_SUMMARY) { autoSummarize(); }
   } catch (e) {
     state.messages.pop();
-    saveMessages();
+    saveCurrentCharacter();
     renderMessages();
     addSystemMsg('❌ 网络错误：' + (e.message || '请检查网络连接'), true);
   }
@@ -583,8 +631,8 @@ function importData(file) {
       state.currentState = s.currentState || '';
       state.userIdentity = s.userIdentity || '';
      state.messages = Array.isArray(data.messages) ? data.messages : [];
-      persistSettings();
-      saveMessages();
+      saveCurrentCharacter();
+      saveCurrentCharacter();
       syncSettingsUI();
       applyBackground(state.bgImage);
       renderMessages();
@@ -618,13 +666,13 @@ function renderHistoryEvents() {
     input.value = state.historyEvents[i] || '';
     input.placeholder = '重要事件 ' + (i+1);
     input.addEventListener('change', function(idx) {
-      return function() { state.historyEvents[idx] = this.value; saveJson(LS.HISTORY_EVENTS, state.historyEvents); };
+      return function() { state.historyEvents[idx] = this.value; saveCurrentCharacter(); };
     }(i));
     const delBtn = document.createElement('button');
     delBtn.className = 'history-del-btn';
     delBtn.textContent = '✕';
     delBtn.addEventListener('click', function(idx) {
-      return function() { state.historyEvents.splice(idx, 1); saveJson(LS.HISTORY_EVENTS, state.historyEvents); renderHistoryEvents(); };
+      return function() { state.historyEvents.splice(idx, 1); saveCurrentCharacter(); renderHistoryEvents(); };
     }(i));
     div.appendChild(input);
     div.appendChild(delBtn);
@@ -674,12 +722,98 @@ function setupPWA() {
   document.head.appendChild(meta);
 }
 
-/* ---- Init ---- */
-function init() {
-  loadState();
+/* ---- Character System ---- */
+function showLoginScreen() {
+  document.getElementById('loginOverlay').style.display = 'flex';
+  document.getElementById('charNameInput').value = '';
+  renderCharacterList();
+}
+function hideLoginScreen() {
+  document.getElementById('loginOverlay').style.display = 'none';
+}
+function renderCharacterList() {
+  var wrap = document.getElementById('charListItems'), list = getCharacterList();
+  if (!wrap) return;
+  if (list.length === 0) { wrap.innerHTML = '<p style="color:#666;font-size:13px;text-align:center">还没有角色，输入名称创建一个吧</p>'; return; }
+  wrap.innerHTML = '';
+  for (var i = 0; i < list.length; i++) {
+    (function(n){
+      var btn = document.createElement('div');
+      btn.className = 'char-list-item';
+      btn.textContent = n;
+      btn.addEventListener('click', function(){ loginCharacter(n); });
+      wrap.appendChild(btn);
+    })(list[i]);
+  }
+}
+function loginCharacter(name) {
+  var list = getCharacterList();
+  if (list.indexOf(name) === -1) { addSystemMsg('❌ 角色 "'+name+'" 不存在', true); return; }
+  state.currentCharacter = name;
+  loadCharacterData(name);
+  localStorage.setItem(LS.CURRENT_CHAR, name);
+  hideLoginScreen();
   syncSettingsUI();
   applyBackground(state.bgImage);
   renderMessages();
+  var d = document.getElementById('currentCharDisplay');
+  if (d) d.textContent = name;
+  document.getElementById('settingsOverlay').classList.remove('active');
+}
+function createCharacter(name) {
+  var t = name.trim();
+  if (!t) { addSystemMsg('⚠️ 请输入角色名称', true); return; }
+  var list = getCharacterList();
+  if (list.indexOf(t) !== -1) { addSystemMsg('⚠️ 角色 "'+t+'" 已存在，请直接登录', true); return; }
+  list.push(t);
+  saveCharacterList(list);
+  state.currentCharacter = t;
+  state.apiKey = ''; state.systemPrompt = ''; state.style = ''; state.userIdentity = '';
+  state.bgImage = ''; state.historyEvents = []; state.currentState = ''; state.summary = ''; state.messages = [];
+  saveCurrentCharacter();
+  localStorage.setItem(LS.CURRENT_CHAR, t);
+  hideLoginScreen();
+  syncSettingsUI();
+  applyBackground('');
+  renderMessages();
+  var d = document.getElementById('currentCharDisplay');
+  if (d) d.textContent = t;
+  addSystemMsg('✅ 角色 "'+t+'" 创建成功');
+}
+function switchCharacter() {
+  saveCurrentCharacter();
+  localStorage.removeItem(LS.CURRENT_CHAR);
+  state.currentCharacter = '';
+  showLoginScreen();
+}
+function deleteCharacter() {
+  var name = state.currentCharacter;
+  if (!name) return;
+  if (!confirm('确定要永久删除角色 "'+name+'" 及其所有数据吗？此操作不可撤销！')) return;
+  try { localStorage.removeItem(getCharDataKey(name)); localStorage.removeItem(getCharMsgKey(name)); } catch(e) {}
+  var list = getCharacterList(), idx = list.indexOf(name);
+  if (idx !== -1) { list.splice(idx, 1); saveCharacterList(list); }
+  localStorage.removeItem(LS.CURRENT_CHAR);
+  state.currentCharacter = '';
+  showLoginScreen();
+}
+
+/* ---- Init ---- */
+function init() {
+  var savedChar = localStorage.getItem(LS.CURRENT_CHAR);
+  var list = getCharacterList();
+  if (savedChar && list.indexOf(savedChar) !== -1) {
+    state.currentCharacter = savedChar;
+    loadCharacterData(savedChar);
+    hideLoginScreen();
+    applyBackground(state.bgImage);
+    renderMessages();
+    syncSettingsUI();
+    var d = document.getElementById('currentCharDisplay');
+    if (d) d.textContent = savedChar;
+  } else {
+    showLoginScreen();
+  }
   setupPWA();
 }
 
@@ -697,30 +831,40 @@ $('settingsBtn').addEventListener('click', function() { settingsOverlay.classLis
 $('closeSettingsBtn').addEventListener('click', function() { settingsOverlay.classList.remove('active'); });
 $('settingsOverlayBg').addEventListener('click', function() { settingsOverlay.classList.remove('active'); });
 
-apiKeyInput.addEventListener('change', function() { state.apiKey = this.value.trim(); save(LS.API_KEY, state.apiKey); });
-systemPromptInput.addEventListener('change', function() { state.systemPrompt = this.value.trim(); save(LS.SYSTEM_PROMPT, state.systemPrompt); });
-styleInput.addEventListener('change', function() { state.style = this.value.trim(); save(LS.STYLE, state.style); });
-userIdentityInput.addEventListener('change', function() { state.userIdentity = this.value.trim(); save(LS.USER_IDENTITY, state.userIdentity); });
+apiKeyInput.addEventListener('change', function() { state.apiKey = this.value.trim(); saveCurrentCharacter(); });
+systemPromptInput.addEventListener('change', function() { state.systemPrompt = this.value.trim(); saveCurrentCharacter(); });
+styleInput.addEventListener('change', function() { state.style = this.value.trim(); saveCurrentCharacter(); });
+userIdentityInput.addEventListener('change', function() { state.userIdentity = this.value.trim(); saveCurrentCharacter(); });
 
-currentStateInput.addEventListener('change', function() { state.currentState = this.value.trim(); save(LS.CURRENT_STATE, state.currentState); });
-addEventBtn.addEventListener('click', function() { state.historyEvents.push(''); saveJson(LS.HISTORY_EVENTS, state.historyEvents); renderHistoryEvents(); });
+currentStateInput.addEventListener('change', function() { state.currentState = this.value.trim(); saveCurrentCharacter(); });
+addEventBtn.addEventListener('click', function() { state.historyEvents.push(''); saveCurrentCharacter(); renderHistoryEvents(); });
 $('bgUploadBtn').addEventListener('click', function() { bgFileInput.click(); });
 bgFileInput.addEventListener('change', function(e) {
-  const file = e.target.files?.[0];
-  if (!file) return;
+  var file = e.target.files?.[0]; if (!file) return;
   if (!file.type.startsWith('image/')) { addSystemMsg('❌ 请选择图片文件', true); return; }
-  const reader = new FileReader();
+  var reader = new FileReader();
   reader.onload = function(ev) {
-    state.bgImage = ev.target.result;
-    save(LS.BG_IMAGE, state.bgImage);
-    applyBackground(state.bgImage);
+    var img = new Image();
+    img.onload = function() {
+      var MAX = 800, w = img.width, h = img.height, r = Math.min(MAX/w, MAX/h, 1);
+      w = Math.round(w*r); h = Math.round(h*r);
+      var c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      state.bgImage = c.toDataURL('image/jpeg', 0.7);
+      saveCurrentCharacter();
+      applyBackground(state.bgImage);
+    };
+    img.src = ev.target.result;
   };
-  reader.readAsDataURL(file);
-  bgFileInput.value = '';
+  reader.readAsDataURL(file); bgFileInput.value = '';
 });
-$('bgResetBtn').addEventListener('click', function() {
-  state.bgImage = ''; save(LS.BG_IMAGE, ''); applyBackground('');
-});
+$('bgResetBtn').addEventListener('click', function() { state.bgImage = ''; saveCurrentCharacter(); applyBackground(''); });
+/* ---- Character System Event Listeners ---- */
+loginCharBtn.addEventListener('click', function() { loginCharacter(document.getElementById('charNameInput').value.trim()); });
+createCharBtn.addEventListener('click', function() { createCharacter(document.getElementById('charNameInput').value.trim()); });
+document.getElementById('charNameInput').addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); loginCharacter(charNameInput.value.trim()); } });
+switchCharBtn.addEventListener('click', function() { switchCharacter(); });
+deleteCharBtn.addEventListener('click', function() { deleteCharacter(); });
 
 $('exportBtn').addEventListener('click', exportAllData);
 $('importBtn').addEventListener('click', function() { importFileInput.click(); });
@@ -735,8 +879,7 @@ $('clearChatBtn').addEventListener('click', function() {
   if (!confirm('确定要清空所有聊天记录吗？此操作不可撤销。')) return;
   state.messages = [];
   state.summary = '';
-  saveMessages();
-  save(LS.SUMMARY, '');
+  saveCurrentCharacter();
   renderMessages();
 });
 
