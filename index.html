@@ -155,7 +155,7 @@ textarea{resize:none}
 
 <div id="app">
   <header id="topBar">
-    <span class="ai-name">AI 助手</span>
+<span class="ai-name">登录</span>
     <button id="settingsBtn" aria-label="设置">⚙️</button>
   </header>
 
@@ -757,7 +757,8 @@ function loginCharacter(name) {
   applyBackground(state.bgImage);
   renderMessages();
   var d = document.getElementById('currentCharDisplay');
-  if (d) d.textContent = name;
+if (d) d.textContent = name;
+  document.querySelector('.ai-name').textContent = name;
   document.getElementById('settingsOverlay').classList.remove('active');
 }
 function createCharacter(name) {
@@ -777,7 +778,8 @@ function createCharacter(name) {
   applyBackground('');
   renderMessages();
   var d = document.getElementById('currentCharDisplay');
-  if (d) d.textContent = t;
+if (d) d.textContent = t;
+  document.querySelector('.ai-name').textContent = t;
   addSystemMsg('✅ 角色 "'+t+'" 创建成功');
 }
 function switchCharacter() {
@@ -810,7 +812,8 @@ function init() {
     renderMessages();
     syncSettingsUI();
     var d = document.getElementById('currentCharDisplay');
-    if (d) d.textContent = savedChar;
+if (d) d.textContent = savedChar;
+    document.querySelector('.ai-name').textContent = savedChar;
   } else {
     showLoginScreen();
   }
