@@ -605,6 +605,7 @@ async function sendMessage() {
     delete assistantMsg._streaming;
     finishStreamingBubble();
     saveCurrentCharacter();
+    renderMessages();
     if (state.messages.length > MAX_MSG_BEFORE_SUMMARY) { autoSummarize(); }
   } catch (e) {
     state.messages.pop();
@@ -672,6 +673,7 @@ async function regenerateMessage() {
     delete astMsg._streaming;
     finishStreamingBubble();
     saveCurrentCharacter();
+    renderMessages();
   } catch(e) {
     state.messages.pop(); saveCurrentCharacter(); renderMessages();
     addSystemMsg('❌ 网络错误：' + (e.message || '请检查网络连接'), true);
