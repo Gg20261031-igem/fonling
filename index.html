@@ -149,6 +149,18 @@ textarea{resize:none}
 #charListWrap p{color:#888;font-size:13px;margin-bottom:8px}
 .char-list-item{padding:10px 14px;background:#111;border-radius:8px;color:#e0e0e0;font-size:15px;margin-bottom:6px;cursor:pointer;transition:background .15s}
 .char-list-item:active{background:#252525}
+/* ===== Message Actions ===== */
+.msg-actions{margin-top:6px;display:none;gap:6px;align-self:flex-start;margin-bottom:-8px}
+.msg-actions.show{display:flex}
+.msg-action-btn{padding:5px 12px;border-radius:6px;font-size:12px;border:1px solid #555;background:transparent;color:#aaa;cursor:pointer;line-height:1.3}
+.msg-action-btn:active{background:rgba(255,255,255,.1)}
+.edit-mode{width:100%;margin-top:4px}
+.edit-textarea{width:100%;min-height:70px;padding:8px 10px;border:1px solid var(--primary);border-radius:8px;background:#1a1a1a;color:#e0e0e0;font-size:14px;line-height:1.5;resize:vertical;outline:none;font-family:inherit;box-sizing:border-box}
+.edit-actions{display:flex;gap:8px;margin-top:6px}
+.edit-actions button{flex:1;padding:7px 0;border-radius:6px;font-size:13px;font-weight:500;border:none;cursor:pointer}
+.confirm-edit{background:var(--primary);color:#fff}
+.cancel-edit{background:transparent;border:1px solid #555;color:#aaa}
+.confirm-edit:active,.cancel-edit:active{opacity:.7}
 </style>
 </head>
 <body>
@@ -378,9 +390,40 @@ function renderMessages(scrollToBottom_) {
     if (msg._streaming) bubble.classList.add('streaming');
     bubble.textContent = msg.content || '';
     wrap.appendChild(bubble);
+    // Edit/Regen buttons for latest AI message
+    if (msg.role === 'assistant' && !msg._streaming && i === state.messages.length - 1) {
+      var _a = document.createElement('div'); _a.className = 'msg-actions';
+      var _e = document.createElement('button'); _e.className = 'msg-action-btn'; _e.textContent = '编辑';
+      var _r = document.createElement('button'); _r.className = 'msg-action-btn'; _r.textContent = '重说';
+      _a.appendChild(_e); _a.appendChild(_r); wrap.appendChild(_a);
+      bubble.addEventListener('click', function(el){return function(ev){ev.stopPropagation();document.querySelectorAll('.msg-actions.show').forEach(function(x){if(x!==el)x.classList.remove('show')});el.classList.toggle('show')};}(_a));
+      _e.addEventListener('click', function(idx){return function(ev){ev.stopPropagation();startEdit(idx);};}(i));
+      _r.addEventListener('click', function(ev){ev.stopPropagation();regenerateMessage();});
+    }
     chatArea.appendChild(wrap);
   }
   if (scrollToBottom_) scrollToBottom();
+}
+function startEdit(index) {
+  var wraps = document.querySelectorAll('.msg-wrap.assistant');
+  if (wraps.length === 0) return;
+  var wrap = wraps[wraps.length - 1];
+  var ex = wrap.querySelector('.edit-mode');
+  if (ex) { ex.style.display = 'block'; ex.querySelector('textarea').focus(); return; }
+  var ed = document.createElement('div');
+  ed.className = 'edit-mode';
+  var ta = document.createElement('textarea');
+  ta.className = 'edit-textarea';
+  ta.value = state.messages[index].content || '';
+  var btns = document.createElement('div');
+  btns.className = 'edit-actions';
+  var cf = document.createElement('button'); cf.className = 'confirm-edit'; cf.textContent = '确认';
+  var cn = document.createElement('button'); cn.className = 'cancel-edit'; cn.textContent = '取消';
+  btns.appendChild(cf); btns.appendChild(cn);
+  ed.appendChild(ta); ed.appendChild(btns); wrap.appendChild(ed);
+  ta.focus();
+  cf.addEventListener('click', function(idx,ta2){return function(ev){ev.stopPropagation();var v=ta2.value.trim();if(v){state.messages[idx].content=v;saveCurrentCharacter();renderMessages();}};}(index,ta));
+  cn.addEventListener('click', function(div){return function(ev){ev.stopPropagation();div.style.display='none';};}(ed));
 }
 function scrollToBottom() {
   requestAnimationFrame(function(){ chatArea.scrollTop = chatArea.scrollHeight; });
@@ -572,6 +615,69 @@ async function sendMessage() {
   state.isStreaming = false;
   sendBtn.disabled = false;
   messageInput.focus();
+}
+
+/* ---- Regenerate Message ---- */
+async function regenerateMessage() {
+  if (state.isStreaming) return;
+  var aiIdx = -1;
+  for (var ri = state.messages.length - 1; ri >= 0; ri--) {
+    if (state.messages[ri].role === 'assistant') { aiIdx = ri; break; }
+  }
+  if (aiIdx === -1) return;
+  var usrIdx = -1;
+  for (var uj = aiIdx - 1; uj >= 0; uj--) {
+    if (state.messages[uj].role === 'user') { usrIdx = uj; break; }
+  }
+  if (usrIdx === -1) return;
+  state.messages.splice(aiIdx);
+  saveCurrentCharacter();
+  renderMessages();
+  state.isStreaming = true;
+  sendBtn.disabled = true;
+  var astMsg = { role: 'assistant', content: '', _streaming: true };
+  state.messages.push(astMsg);
+  renderMessages();
+  var apiMessages = buildApiMessages();
+  try {
+    var resp = await fetch(DEEPSEEK_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.apiKey },
+      body: JSON.stringify({ model: MODEL, messages: apiMessages, stream: true, max_tokens: 4096 }),
+    });
+    if (!resp.ok) {
+      state.messages.pop(); saveCurrentCharacter(); renderMessages();
+      addSystemMsg('❌ 重说失败 (' + resp.status + ')', true);
+      state.isStreaming = false; sendBtn.disabled = false; return;
+    }
+    var reader = resp.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = '';
+    var fullContent = '';
+    while (true) {
+      var rdd = await reader.read();
+      if (rdd.done) break;
+      buffer += decoder.decode(rdd.value, { stream: true });
+      var rawLines = buffer.split('\n');
+      buffer = rawLines.pop() || '';
+      for (var li = 0; li < rawLines.length; li++) {
+        var ln = rawLines[li].trim();
+        if (!ln || !ln.startsWith('data:')) continue;
+        var dl = ln.slice(5).trim();
+        if (dl === '[DONE]') continue;
+        try { var pr = JSON.parse(dl); var dd = pr.choices?.[0]?.delta?.content || ''; if (dd) { fullContent += dd; astMsg.content = fullContent; updateStreamingBubble(); } } catch(_) {}
+      }
+    }
+    astMsg.content = fullContent;
+    delete astMsg._streaming;
+    finishStreamingBubble();
+    saveCurrentCharacter();
+  } catch(e) {
+    state.messages.pop(); saveCurrentCharacter(); renderMessages();
+    addSystemMsg('❌ 网络错误：' + (e.message || '请检查网络连接'), true);
+  }
+  state.isStreaming = false;
+  sendBtn.disabled = false;
 }
 
 /* ---- Helpers ---- */
