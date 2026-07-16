@@ -407,17 +407,38 @@ function renderMessages(scrollToBottom_) {
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     if (msg._streaming) bubble.classList.add('streaming');
+    // Per-message role color for user bubbles
+    if (msg.role === 'user' && msg._roleName) {
+      for (var ri = 0; ri < state.roles.length; ri++) {
+        if (state.roles[ri].name === msg._roleName) {
+          bubble.style.backgroundColor = state.roles[ri].color;
+          break;
+        }
+      }
+    }
     bubble.innerHTML = formatMsgText(msg.content || '');
     wrap.appendChild(bubble);
-    // Edit/Regen buttons for latest AI message
-    if (msg.role === 'assistant' && !msg._streaming && i === state.messages.length - 1) {
+    // Action buttons for AI messages
+    if (msg.role === 'assistant' && !msg._streaming) {
       var _a = document.createElement('div'); _a.className = 'msg-actions';
-      var _e = document.createElement('button'); _e.className = 'msg-action-btn'; _e.textContent = '编辑';
-      var _r = document.createElement('button'); _r.className = 'msg-action-btn'; _r.textContent = '重说';
-      _a.appendChild(_e); _a.appendChild(_r); wrap.appendChild(_a);
+      // backtrack button for non-latest AI messages
+      if (i < state.messages.length - 1) {
+        var _b = document.createElement('button'); _b.className = 'msg-action-btn'; _b.textContent = '回溯';
+        _b.addEventListener('click', function(idx){return function(ev){ev.stopPropagation();backtrackMessage(idx);};}(i));
+        _a.appendChild(_b);
+      }
+      // edit + regen + backtrack for latest AI message
+      if (i === state.messages.length - 1) {
+        var _e = document.createElement('button'); _e.className = 'msg-action-btn'; _e.textContent = '编辑';
+        var _r = document.createElement('button'); _r.className = 'msg-action-btn'; _r.textContent = '重说';
+        var _b = document.createElement('button'); _b.className = 'msg-action-btn'; _b.textContent = '回溯';
+        _e.addEventListener('click', function(idx){return function(ev){ev.stopPropagation();startEdit(idx);};}(i));
+        _r.addEventListener('click', function(ev){ev.stopPropagation();regenerateMessage();});
+        _b.addEventListener('click', function(idx){return function(ev){ev.stopPropagation();backtrackMessage(idx);};}(i));
+        _a.appendChild(_e); _a.appendChild(_r); _a.appendChild(_b);
+      }
+      wrap.appendChild(_a);
       bubble.addEventListener('click', function(el){return function(ev){ev.stopPropagation();document.querySelectorAll('.msg-actions.show').forEach(function(x){if(x!==el)x.classList.remove('show')});el.classList.toggle('show')};}(_a));
-      _e.addEventListener('click', function(idx){return function(ev){ev.stopPropagation();startEdit(idx);};}(i));
-      _r.addEventListener('click', function(ev){ev.stopPropagation();regenerateMessage();});
     }
     chatArea.appendChild(wrap);
   }
@@ -571,7 +592,7 @@ async function sendMessage() {
   var isNarration = text.startsWith('/');
   var finalText = isNarration ? text.slice(1).trim() : text;
   if (isNarration && !finalText) { state.isStreaming = false; sendBtn.disabled = false; return; }
-  state.messages.push({ role: 'user', content: finalText, _narration: isNarration || undefined });
+  state.messages.push({ role: 'user', content: finalText, _narration: isNarration || undefined, _roleName: state.currentRole || null });
   saveCurrentCharacter();
   renderMessages();
   const assistantMsg = { role: 'assistant', content: '', _streaming: true };
