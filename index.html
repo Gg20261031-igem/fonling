@@ -223,6 +223,13 @@ textarea{resize:none}
       <div id="historyEventsContainer"></div>
       <div class="spacer"></div>
       <button class="btn-block btn-outline" id="addEventBtn">+ 添加历史事件</button>
+      <div class="spacer"></div>
+      <span class="label">关键信息</span>
+      <span class="desc">让 AI 记住的关键信息，如人物关系、重要事件等</span>
+      <div id="keyInfoContainer"></div>
+      <div class="spacer"></div>
+      <button class="btn-block btn-outline" id="addKeyInfoBtn">+ 添加关键信息</button>
+
 
       <div class="spacer"></div>
       <span class="label">角色（切换身份）</span>
@@ -306,6 +313,7 @@ let state = {
    summary: '',
   userIdentity: '',
   historyEvents: [],
+  keyInfo: [],
   currentState: '',
   currentCharacter: '',
   roles: [],
@@ -358,6 +366,7 @@ function loadCharacterData(charName) {
     state.userIdentity = d.userIdentity || '';
     state.bgImage = d.bgImage || '';
     state.historyEvents = Array.isArray(d.historyEvents) ? d.historyEvents : [];
+    state.keyInfo = Array.isArray(d.keyInfo) ? d.keyInfo : [];
     state.roles = Array.isArray(d.roles) ? d.roles : [];
     state.currentRole = d.currentRole || null;
     state.currentState = d.currentState || '';
@@ -371,7 +380,7 @@ function saveCurrentCharacter() {
     localStorage.setItem(getCharDataKey(name), JSON.stringify({
       apiKey: state.apiKey, systemPrompt: state.systemPrompt, style: state.style,
       userIdentity: state.userIdentity, bgImage: state.bgImage,
-      historyEvents: state.historyEvents, roles: state.roles, currentRole: state.currentRole, currentState: state.currentState,
+      historyEvents: state.historyEvents, keyInfo: state.keyInfo, roles: state.roles, currentRole: state.currentRole, currentState: state.currentState,
       summary: state.summary
     }));
     localStorage.setItem(getCharMsgKey(name), JSON.stringify(state.messages));
@@ -506,6 +515,14 @@ function buildApiMessages() {
   if (state.currentState) {
     result.push({ role: 'system', content: '当前状态：' + state.currentState });
   }
+  // 关键信息
+  for (let i = 0; i < state.keyInfo.length; i++) {
+    const ki = (state.keyInfo[i] || '').trim();
+    if (ki) {
+      result.push({ role: 'system', content: '关键信息' + (i+1) + '：' + ki });
+    }
+  }
+
   if (state.systemPrompt) {
     result.push({ role: 'system', content: state.systemPrompt }
 );
@@ -772,6 +789,7 @@ function exportAllData() {
      summary: state.summary,
       roles: state.roles,
       currentRole: state.currentRole,
+      keyInfo: state.keyInfo,
       historyEvents: state.historyEvents,
       currentState: state.currentState,
       userIdentity: state.userIdentity,
@@ -828,6 +846,7 @@ function syncSettingsUI() {
   userIdentityInput.value = state.userIdentity;
   currentStateInput.value = state.currentState;
   renderHistoryEvents();
+  renderKeyInfo();
   renderRoles();
 }
 
@@ -855,6 +874,29 @@ function renderHistoryEvents() {
     historyEventsContainer.appendChild(div);
   }
 }
+function renderKeyInfo() {
+  var container = document.getElementById('keyInfoContainer');
+  if (!container) return;
+  container.innerHTML = '';
+  for (var i = 0; i < state.keyInfo.length; i++) {
+    var div = document.createElement('div');
+    div.className = 'history-entry';
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.value = state.keyInfo[i] || '';
+    input.placeholder = '关键信息 ' + (i+1);
+    (function(idx){input.addEventListener('change',function(){state.keyInfo[idx]=this.value;saveCurrentCharacter();});})(i);
+    var delBtn = document.createElement('button');
+    delBtn.className = 'history-del-btn';
+    delBtn.textContent = '✕';
+    (function(idx){delBtn.addEventListener('click',function(){state.keyInfo.splice(idx,1);saveCurrentCharacter();renderKeyInfo();});})(i);
+    div.appendChild(input);
+    div.appendChild(delBtn);
+    container.appendChild(div);
+  }
+}
+
+
 
 /* ---- PWA Setup ---- */
 function setupPWA() {
@@ -946,7 +988,7 @@ function createCharacter(name) {
   saveCharacterList(list);
   state.currentCharacter = t;
   state.apiKey = ''; state.systemPrompt = ''; state.style = ''; state.userIdentity = '';
-  state.bgImage = ''; state.historyEvents = []; state.roles = []; state.currentRole = null; state.currentState = ''; state.summary = ''; state.messages = [];
+  state.bgImage = ''; state.historyEvents = []; state.keyInfo = []; state.roles = []; state.currentRole = null; state.currentState = ''; state.summary = ''; state.messages = [];
   saveCurrentCharacter();
   localStorage.setItem(LS.CURRENT_CHAR, t);
   hideLoginScreen();
@@ -1046,6 +1088,7 @@ document.getElementById('charNameInput').addEventListener('keydown', function(e)
 switchCharBtn.addEventListener('click', function() { switchCharacter(); });
 deleteCharBtn.addEventListener('click', function() { deleteCharacter(); });
 
+$('addKeyInfoBtn').addEventListener('click', function() { state.keyInfo.push(''); saveCurrentCharacter(); renderKeyInfo(); });
 $('addRoleBtn').addEventListener('click', function() {
   if (state.roles.length >= 8) { addSystemMsg('⚠️ 最多只能添加 8 个角色'); return; }
   var used = {};
@@ -1171,6 +1214,7 @@ $('clearChatBtn').addEventListener('click', function() {
   state.summary = '';
   state.roles = [];
   state.currentRole = null;
+  state.keyInfo = [];
   saveCurrentCharacter();
   renderMessages();
 });
